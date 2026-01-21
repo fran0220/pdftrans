@@ -193,6 +193,7 @@ async fn process_pages_parallel(
             }
             
             let page_num = page.page_num;
+            state.add_log(&task_id, format!("第 {} 页开始处理", page_num));
             
             // OCR
             let text = if let Some(ref image_base64) = page.image_base64 {
