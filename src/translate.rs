@@ -89,7 +89,7 @@ pub async fn recognize_text(config: &Config, image_base64: &str) -> Result<Strin
                 ContentPart::Text { text: prompt.to_string() },
                 ContentPart::ImageUrl {
                     image_url: ImageUrl {
-                        url: format!("data:image/png;base64,{}", image_base64),
+                        url: format!("data:image/jpeg;base64,{}", image_base64),
                     },
                 },
             ]),

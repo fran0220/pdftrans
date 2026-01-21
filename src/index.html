@@ -20,7 +20,7 @@
             border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.1);
             padding: 40px;
-            max-width: 500px;
+            max-width: 560px;
             width: 100%;
         }
         h1 {
@@ -54,6 +54,62 @@
             display: none;
             margin-top: 30px;
         }
+        
+        /* Step indicator */
+        .steps {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            position: relative;
+        }
+        .steps::before {
+            content: '';
+            position: absolute;
+            top: 14px;
+            left: 30px;
+            right: 30px;
+            height: 2px;
+            background: #e0e0e0;
+            z-index: 0;
+        }
+        .step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            z-index: 1;
+        }
+        .step-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: #999;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+        }
+        .step.active .step-icon {
+            background: #007bff;
+            color: white;
+        }
+        .step.done .step-icon {
+            background: #28a745;
+            color: white;
+        }
+        .step-label {
+            font-size: 12px;
+            color: #999;
+        }
+        .step.active .step-label,
+        .step.done .step-label {
+            color: #333;
+        }
+        
+        /* Progress bar */
         .progress-bar {
             height: 8px;
             background: #e0e0e0;
@@ -66,14 +122,67 @@
             width: 0%;
             transition: width 0.3s;
         }
-        .progress-text {
-            margin-top: 10px;
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 13px;
             color: #666;
+        }
+        .eta { color: #007bff; }
+        
+        .progress-text {
+            margin-top: 15px;
+            color: #333;
             text-align: center;
             font-size: 14px;
         }
-        .status {
+        
+        /* Stats row */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
             margin-top: 10px;
+            font-size: 12px;
+            color: #888;
+        }
+        .stat { display: flex; align-items: center; gap: 4px; }
+        .stat-icon { font-size: 14px; }
+        
+        /* Log panel */
+        .log-panel {
+            margin-top: 15px;
+        }
+        .log-panel summary {
+            cursor: pointer;
+            font-size: 13px;
+            color: #666;
+            user-select: none;
+        }
+        .log-panel summary:hover { color: #007bff; }
+        .log-content {
+            margin-top: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        .log-entry {
+            padding: 3px 0;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            gap: 8px;
+        }
+        .log-entry:last-child { border-bottom: none; }
+        .log-time { color: #999; flex-shrink: 0; }
+        .log-msg { color: #333; }
+        
+        .status {
+            margin-top: 15px;
             text-align: center;
             font-size: 14px;
         }
@@ -93,17 +202,6 @@
             transition: background 0.3s;
         }
         .download-btn:hover { background: #218838; }
-        .preview {
-            display: none;
-            margin-top: 20px;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            max-height: 200px;
-            overflow-y: auto;
-            font-size: 14px;
-            line-height: 1.6;
-        }
     </style>
 </head>
 <body>
@@ -119,10 +217,51 @@
         </div>
         
         <div class="progress-section" id="progressSection">
+            <!-- Step indicator -->
+            <div class="steps">
+                <div class="step" data-step="Rendering">
+                    <div class="step-icon">1</div>
+                    <div class="step-label">解析</div>
+                </div>
+                <div class="step" data-step="Recognizing">
+                    <div class="step-icon">2</div>
+                    <div class="step-label">识别</div>
+                </div>
+                <div class="step" data-step="Translating">
+                    <div class="step-icon">3</div>
+                    <div class="step-label">翻译</div>
+                </div>
+                <div class="step" data-step="Generating">
+                    <div class="step-icon">4</div>
+                    <div class="step-label">生成</div>
+                </div>
+            </div>
+            
+            <!-- Progress bar -->
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
             </div>
+            <div class="progress-info">
+                <span id="progressPercent">0%</span>
+                <span class="eta" id="eta"></span>
+            </div>
+            
+            <!-- Status message -->
             <div class="progress-text" id="progressText">准备中...</div>
+            
+            <!-- Stats -->
+            <div class="stats" id="stats" style="display:none;">
+                <div class="stat"><span class="stat-icon">📄</span><span id="statPages">0 页</span></div>
+                <div class="stat"><span class="stat-icon">📝</span><span id="statText">0 提取</span></div>
+                <div class="stat"><span class="stat-icon">🔍</span><span id="statOcr">0 OCR</span></div>
+            </div>
+            
+            <!-- Log panel -->
+            <details class="log-panel">
+                <summary>查看处理日志</summary>
+                <div class="log-content" id="logContent"></div>
+            </details>
+            
             <div class="status" id="status"></div>
         </div>
         
@@ -135,11 +274,20 @@
         const fileName = document.getElementById('fileName');
         const progressSection = document.getElementById('progressSection');
         const progressFill = document.getElementById('progressFill');
+        const progressPercent = document.getElementById('progressPercent');
         const progressText = document.getElementById('progressText');
+        const eta = document.getElementById('eta');
+        const stats = document.getElementById('stats');
+        const statPages = document.getElementById('statPages');
+        const statText = document.getElementById('statText');
+        const statOcr = document.getElementById('statOcr');
+        const logContent = document.getElementById('logContent');
         const status = document.getElementById('status');
         const downloadBtn = document.getElementById('downloadBtn');
+        const steps = document.querySelectorAll('.step');
         
         let currentTaskId = null;
+        const stepOrder = ['Rendering', 'Recognizing', 'Translating', 'Generating', 'Complete'];
 
         uploadArea.addEventListener('click', () => fileInput.click());
         uploadArea.addEventListener('dragover', (e) => {
@@ -163,6 +311,41 @@
             }
         });
 
+        function updateSteps(currentStatus) {
+            const currentIdx = stepOrder.indexOf(currentStatus);
+            steps.forEach(step => {
+                const stepStatus = step.dataset.step;
+                const stepIdx = stepOrder.indexOf(stepStatus);
+                step.classList.remove('active', 'done');
+                if (stepIdx < currentIdx) {
+                    step.classList.add('done');
+                    step.querySelector('.step-icon').textContent = '✓';
+                } else if (stepIdx === currentIdx) {
+                    step.classList.add('active');
+                }
+            });
+        }
+
+        function formatEta(seconds) {
+            if (!seconds || seconds <= 0) return '';
+            if (seconds < 60) return `约 ${seconds} 秒`;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `约 ${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function formatTime(ts) {
+            const d = new Date(ts);
+            return d.toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        function updateLogs(logs) {
+            logContent.innerHTML = logs.map(log => 
+                `<div class="log-entry"><span class="log-time">${formatTime(log.ts)}</span><span class="log-msg">${log.msg}</span></div>`
+            ).join('');
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
         async function handleFile(file) {
             fileName.textContent = file.name;
             fileName.style.display = 'block';
@@ -171,6 +354,11 @@
             status.textContent = '';
             status.className = 'status';
             progressFill.style.width = '0%';
+            progressPercent.textContent = '0%';
+            eta.textContent = '';
+            stats.style.display = 'none';
+            logContent.innerHTML = '';
+            steps.forEach(s => { s.classList.remove('active', 'done'); s.querySelector('.step-icon').textContent = s.querySelector('.step-icon').textContent.replace('✓', ''); });
             
             const formData = new FormData();
             formData.append('file', file);
@@ -201,12 +389,31 @@
             eventSource.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 
+                // Update step indicator
+                updateSteps(data.status);
+                
+                // Update progress bar
+                const percent = data.overall_percent || 0;
+                progressFill.style.width = percent + '%';
+                progressPercent.textContent = percent + '%';
+                
+                // Update ETA
+                eta.textContent = formatEta(data.eta_seconds);
+                
+                // Update message
+                progressText.textContent = data.message;
+                
+                // Update stats
                 if (data.total_pages > 0) {
-                    const percent = Math.round((data.current_page / data.total_pages) * 100);
-                    progressFill.style.width = percent + '%';
-                    progressText.textContent = `${data.current_page} / ${data.total_pages} 页 (${percent}%)`;
-                } else {
-                    progressText.textContent = data.message;
+                    stats.style.display = 'flex';
+                    statPages.textContent = data.total_pages + ' 页';
+                    statText.textContent = data.text_pages + ' 提取';
+                    statOcr.textContent = data.ocr_pages + ' OCR';
+                }
+                
+                // Update logs
+                if (data.logs && data.logs.length > 0) {
+                    updateLogs(data.logs);
                 }
                 
                 if (data.status === 'Complete') {
@@ -214,11 +421,16 @@
                     status.textContent = '✅ ' + data.message;
                     status.className = 'status success';
                     progressFill.style.width = '100%';
+                    progressPercent.textContent = '100%';
+                    eta.textContent = '';
                     downloadBtn.style.display = 'block';
+                    // Mark all steps done
+                    steps.forEach(s => { s.classList.remove('active'); s.classList.add('done'); s.querySelector('.step-icon').textContent = '✓'; });
                 } else if (data.status === 'Error') {
                     eventSource.close();
                     status.textContent = '❌ ' + data.message;
                     status.className = 'status error';
+                    eta.textContent = '';
                 }
             };
             

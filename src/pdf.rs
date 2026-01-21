@@ -6,13 +6,32 @@ use std::fs;
 
 pub struct PdfPage {
     pub page_num: usize,
-    pub image_base64: String,
+    pub image_base64: Option<String>,  // None if text extraction succeeded
+    pub extracted_text: Option<String>, // Some if text extraction succeeded
 }
 
-/// Render PDF pages to images using pdftoppm (from poppler-utils)
-/// Falls back to extracting text if pdftoppm is not available
-pub fn render_pdf_pages(data: &[u8]) -> Result<Vec<PdfPage>, String> {
-    // Create temp directory
+/// Process PDF pages: always use OCR for reliable text extraction
+/// Text extraction from PDF is unreliable due to font encoding issues
+pub fn process_pdf_pages(data: &[u8]) -> Result<Vec<PdfPage>, String> {
+    let doc = Document::load_mem(data)
+        .map_err(|e| format!("Failed to parse PDF: {}", e))?;
+    
+    let page_count = doc.get_pages().len();
+    if page_count == 0 {
+        return Err("PDF has no pages".to_string());
+    }
+    
+    // Always use OCR - PDF text extraction is unreliable
+    let mut pages: Vec<PdfPage> = Vec::with_capacity(page_count);
+    for page_num in 1..=page_count {
+        pages.push(PdfPage {
+            page_num,
+            image_base64: None,
+            extracted_text: None,
+        });
+    }
+    
+    // Render all pages to images for OCR
     let temp_dir = TempDir::new()
         .map_err(|e| format!("Failed to create temp dir: {}", e))?;
     
@@ -20,22 +39,13 @@ pub fn render_pdf_pages(data: &[u8]) -> Result<Vec<PdfPage>, String> {
     fs::write(&pdf_path, data)
         .map_err(|e| format!("Failed to write temp PDF: {}", e))?;
     
-    // Get page count from lopdf
-    let doc = Document::load_mem(data)
-        .map_err(|e| format!("Failed to parse PDF: {}", e))?;
-    let page_count = doc.get_pages().len();
-    
-    if page_count == 0 {
-        return Err("PDF has no pages".to_string());
-    }
-    
-    // Try to use pdftoppm with lower DPI for smaller images
     let output_prefix = temp_dir.path().join("page");
     let result = Command::new("pdftoppm")
         .args([
-            "-png",
-            "-r", "100",  // 100 DPI - balance quality and API limits
-            "-scale-to", "1200",  // Max dimension
+            "-jpeg",
+            "-jpegopt", "quality=70",
+            "-r", "72",
+            "-scale-to", "800",
             pdf_path.to_str().unwrap(),
             output_prefix.to_str().unwrap(),
         ])
@@ -43,37 +53,248 @@ pub fn render_pdf_pages(data: &[u8]) -> Result<Vec<PdfPage>, String> {
     
     match result {
         Ok(output) if output.status.success() => {
-            // Read generated images
-            let mut pages = Vec::with_capacity(page_count);
-            
-            for i in 1..=page_count {
-                // pdftoppm generates files like page-1.png, page-01.png, or page-001.png
-                let image_path = find_page_image(temp_dir.path(), i)?;
-                
+            for page_num in 1..=page_count {
+                let image_path = find_page_image(temp_dir.path(), page_num)?;
                 let image_data = fs::read(&image_path)
-                    .map_err(|e| format!("Failed to read page {} image: {}", i, e))?;
+                    .map_err(|e| format!("Failed to read page {} image: {}", page_num, e))?;
                 
-                pages.push(PdfPage {
-                    page_num: i,
-                    image_base64: BASE64.encode(&image_data),
-                });
+                pages[page_num - 1].image_base64 = Some(BASE64.encode(&image_data));
             }
-            
             Ok(pages)
         }
         _ => {
-            // pdftoppm not available, try alternative approach
             Err("pdftoppm not found. Please install poppler-utils:\n  macOS: brew install poppler\n  Ubuntu: apt install poppler-utils".to_string())
         }
     }
 }
 
+/// Extract text from a single page
+fn extract_page_text(doc: &Document, page_num: usize) -> String {
+    let page_id = match doc.get_pages().get(&(page_num as u32)) {
+        Some(id) => *id,
+        None => return String::new(),
+    };
+    
+    let content = match doc.get_page_content(page_id) {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    
+    // Simple text extraction from content stream
+    extract_text_from_content(&content, doc)
+}
+
+/// Extract readable text from PDF content stream
+fn extract_text_from_content(content: &[u8], doc: &Document) -> String {
+    let content_str = String::from_utf8_lossy(content);
+    let mut text = String::new();
+    let mut in_text = false;
+    let mut current_text = String::new();
+    
+    for line in content_str.lines() {
+        let line = line.trim();
+        
+        if line == "BT" {
+            in_text = true;
+            continue;
+        }
+        if line == "ET" {
+            in_text = false;
+            if !current_text.is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&current_text);
+                current_text.clear();
+            }
+            continue;
+        }
+        
+        if in_text {
+            // Handle text operators: Tj, TJ, ', "
+            if let Some(extracted) = extract_text_operator(line, doc) {
+                current_text.push_str(&extracted);
+            }
+        }
+    }
+    
+    text
+}
+
+/// Extract text from PDF text operators
+fn extract_text_operator(line: &str, _doc: &Document) -> Option<String> {
+    let line = line.trim();
+    
+    // Handle (text) Tj
+    if line.ends_with(" Tj") || line.ends_with(")Tj") {
+        if let Some(start) = line.find('(') {
+            if let Some(end) = line.rfind(')') {
+                let text = &line[start + 1..end];
+                return Some(decode_pdf_string(text));
+            }
+        }
+    }
+    
+    // Handle <hex> Tj
+    if line.ends_with(" Tj") || line.ends_with(">Tj") {
+        if let Some(start) = line.find('<') {
+            if let Some(end) = line.rfind('>') {
+                let hex = &line[start + 1..end];
+                return decode_hex_string(hex);
+            }
+        }
+    }
+    
+    // Handle [ ... ] TJ (array of strings)
+    if line.ends_with(" TJ") || line.ends_with("]TJ") {
+        let mut result = String::new();
+        let mut i = 0;
+        let chars: Vec<char> = line.chars().collect();
+        
+        while i < chars.len() {
+            if chars[i] == '(' {
+                let start = i + 1;
+                i += 1;
+                while i < chars.len() && chars[i] != ')' {
+                    if chars[i] == '\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                if i > start {
+                    let text: String = chars[start..i].iter().collect();
+                    result.push_str(&decode_pdf_string(&text));
+                }
+            } else if chars[i] == '<' {
+                let start = i + 1;
+                i += 1;
+                while i < chars.len() && chars[i] != '>' {
+                    i += 1;
+                }
+                if i > start {
+                    let hex: String = chars[start..i].iter().collect();
+                    if let Some(decoded) = decode_hex_string(&hex) {
+                        result.push_str(&decoded);
+                    }
+                }
+            }
+            i += 1;
+        }
+        
+        if !result.is_empty() {
+            return Some(result);
+        }
+    }
+    
+    None
+}
+
+/// Decode PDF string escapes
+fn decode_pdf_string(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('\\') => result.push('\\'),
+                Some('(') => result.push('('),
+                Some(')') => result.push(')'),
+                Some(c) => result.push(c),
+                None => {}
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    
+    result
+}
+
+/// Decode hex string to text
+fn decode_hex_string(hex: &str) -> Option<String> {
+    let hex = hex.replace(" ", "");
+    if hex.len() % 4 == 0 {
+        // Try UTF-16BE (common for CJK)
+        let mut chars = Vec::new();
+        for i in (0..hex.len()).step_by(4) {
+            if let Ok(code) = u16::from_str_radix(&hex[i..i+4], 16) {
+                if let Some(c) = char::from_u32(code as u32) {
+                    chars.push(c);
+                }
+            }
+        }
+        if !chars.is_empty() {
+            return Some(chars.into_iter().collect());
+        }
+    }
+    
+    // Try simple hex decoding
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .filter_map(|i| u8::from_str_radix(&hex[i..i.min(hex.len()).max(i+2)], 16).ok())
+        .collect();
+    
+    String::from_utf8(bytes).ok()
+}
+
+/// Check if extracted text is valid (not empty, not garbled)
+fn is_text_valid(text: &str) -> bool {
+    let text = text.trim();
+    
+    // Too short - probably failed extraction
+    if text.len() < 50 {
+        return false;
+    }
+    
+    // Count readable characters (must be actual readable text, not PDF encoding artifacts)
+    let total_chars = text.chars().count();
+    
+    // Check for common PDF encoding issues
+    // Many PDFs use CID fonts which produce garbage when decoded naively
+    let control_chars = text.chars().filter(|c| {
+        let code = *c as u32;
+        // Control characters, private use area, or replacement char
+        code < 32 || (0xE000..=0xF8FF).contains(&code) || code == 0xFFFD
+    }).count();
+    
+    // If more than 5% control/private chars, it's garbage
+    if control_chars as f32 / total_chars as f32 > 0.05 {
+        return false;
+    }
+    
+    // Count actual readable characters
+    let readable_chars = text.chars().filter(|c| {
+        c.is_ascii_alphanumeric() || 
+        c.is_ascii_whitespace() || 
+        c.is_ascii_punctuation() ||
+        // CJK ranges
+        ('\u{4E00}'..='\u{9FFF}').contains(c) ||
+        ('\u{3040}'..='\u{30FF}').contains(c) ||  // Japanese
+        ('\u{AC00}'..='\u{D7AF}').contains(c) ||  // Korean
+        // Common CJK punctuation
+        "，。！？、；：（）【】《》「」『』".contains(*c)
+    }).count();
+    
+    // At least 80% should be readable (stricter threshold)
+    let ratio = readable_chars as f32 / total_chars as f32;
+    
+    // Also require minimum word-like structure (has spaces or CJK)
+    let has_structure = text.contains(' ') || 
+        text.chars().any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c));
+    
+    ratio > 0.8 && has_structure
+}
+
 fn find_page_image(dir: &std::path::Path, page_num: usize) -> Result<std::path::PathBuf, String> {
-    // Try different naming patterns
+    // Try different naming patterns (JPEG format)
     let patterns = [
-        format!("page-{}.png", page_num),
-        format!("page-{:02}.png", page_num),
-        format!("page-{:03}.png", page_num),
+        format!("page-{}.jpg", page_num),
+        format!("page-{:02}.jpg", page_num),
+        format!("page-{:03}.jpg", page_num),
     ];
     
     for pattern in &patterns {

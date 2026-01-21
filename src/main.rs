@@ -85,33 +85,49 @@ async fn upload(
 }
 
 async fn process_pdf(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
-    // Step 1: Render PDF to images
-    let pages = match pdf::render_pdf_pages(&data) {
+    // Step 1: Process PDF - extract text or render to images
+    let pages = match pdf::process_pdf_pages(&data) {
         Ok(p) => p,
         Err(e) => {
-            state.set_error(&task_id, format!("PDF 渲染失败: {}", e));
+            state.set_error(&task_id, format!("PDF 处理失败: {}", e));
             return;
         }
     };
     
     let total_pages = pages.len();
-    state.set_rendering(&task_id, total_pages);
+    let ocr_pages = pages.iter().filter(|p| p.image_base64.is_some()).count();
+    let text_pages = total_pages - ocr_pages;
+    
+    state.set_rendering(&task_id, total_pages, ocr_pages, text_pages);
     
     let mut recognized_texts: Vec<String> = Vec::with_capacity(total_pages);
     let mut translated_texts: Vec<String> = Vec::with_capacity(total_pages);
     
-    // Step 2: Recognize text from each page
+    // Step 2: Get text for each page (extracted or OCR)
     for page in &pages {
-        state.set_recognizing(&task_id, page.page_num, total_pages);
-        
-        match translate::recognize_text(&state.config, &page.image_base64).await {
-            Ok(text) => {
-                recognized_texts.push(text);
+        if let Some(ref text) = page.extracted_text {
+            // Text was extracted directly
+            state.set_recognizing(&task_id, page.page_num, total_pages, false);
+            state.add_log(&task_id, format!("第 {} 页: 文本提取成功", page.page_num));
+            recognized_texts.push(text.clone());
+        } else if let Some(ref image_base64) = page.image_base64 {
+            // Need OCR for this page
+            state.set_recognizing(&task_id, page.page_num, total_pages, true);
+            state.add_log(&task_id, format!("第 {} 页: 开始 OCR 识别", page.page_num));
+            
+            match translate::recognize_text(&state.config, image_base64).await {
+                Ok(text) => {
+                    state.add_log(&task_id, format!("第 {} 页: OCR 完成", page.page_num));
+                    recognized_texts.push(text);
+                }
+                Err(e) => {
+                    state.set_error(&task_id, format!("识别第 {} 页失败: {}", page.page_num, e));
+                    return;
+                }
             }
-            Err(e) => {
-                state.set_error(&task_id, format!("识别第 {} 页失败: {}", page.page_num, e));
-                return;
-            }
+        } else {
+            // Neither text nor image - shouldn't happen
+            recognized_texts.push(String::new());
         }
     }
     
@@ -119,9 +135,11 @@ async fn process_pdf(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
     for (i, text) in recognized_texts.iter().enumerate() {
         let page_num = i + 1;
         state.set_translating(&task_id, page_num, total_pages);
+        state.add_log(&task_id, format!("第 {} 页: 开始翻译", page_num));
         
         match translate::translate_text(&state.config, text).await {
             Ok(translated) => {
+                state.add_log(&task_id, format!("第 {} 页: 翻译完成", page_num));
                 translated_texts.push(translated);
             }
             Err(e) => {
