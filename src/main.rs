@@ -10,19 +10,22 @@ use axum::{
     routing::{get, post},
     http::{header, StatusCode},
     body::Body,
+    Json,
 };
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
-use crate::state::AppState;
 
-#[tokio::main(flavor = "current_thread")]
+use crate::state::{AppState, MAX_CONCURRENT_TASKS};
+
+#[tokio::main]
 async fn main() {
     let config = config::Config::from_env();
-    println!("PDF Translator V2 starting...");
+    println!("PDF Translator V2 (Parallel) starting...");
     println!("API Base URL: {}", config.base_url);
     println!("OCR Model: {}", config.ocr_model);
     println!("Translate Model: {}", config.translate_model);
+    println!("Max concurrent tasks: {}", MAX_CONCURRENT_TASKS);
     
     let state = Arc::new(AppState::new(config));
     
@@ -32,6 +35,7 @@ async fn main() {
         .route("/progress/{task_id}", get(progress))
         .route("/cancel/{task_id}", post(cancel))
         .route("/download/{task_id}", get(download))
+        .route("/tasks", get(list_tasks))
         .layer(CorsLayer::very_permissive())
         .with_state(state);
 
@@ -46,47 +50,64 @@ async fn index() -> Html<&'static str> {
     Html(include_str!("index.html"))
 }
 
-const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE: usize = 50 * 1024 * 1024;
 
 async fn upload(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // Check task limit
+    if !state.try_acquire_task_slot() {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("服务繁忙，当前已有 {} 个任务在处理，请稍后重试", MAX_CONCURRENT_TASKS)
+        ));
+    }
+
     while let Some(field) = multipart.next_field().await.map_err(|e| {
+        state.release_task_slot();
         (StatusCode::BAD_REQUEST, format!("Multipart error: {}", e))
     })? {
         if field.name() == Some("file") {
+            let filename = field.file_name().unwrap_or("unknown.pdf").to_string();
             let data = field.bytes().await.map_err(|e| {
+                state.release_task_slot();
                 (StatusCode::BAD_REQUEST, format!("Read error: {}", e))
             })?;
             
             if data.len() > MAX_FILE_SIZE {
+                state.release_task_slot();
                 return Err((StatusCode::BAD_REQUEST, "文件过大，最大支持 50MB".to_string()));
             }
             
             if data.len() < 4 || &data[..4] != b"%PDF" {
+                state.release_task_slot();
                 return Err((StatusCode::BAD_REQUEST, "无效的 PDF 文件".to_string()));
             }
             
             let task_id = uuid::Uuid::new_v4().to_string();
-            state.create_task(&task_id);
+            state.create_task(&task_id, &filename);
             
             let state_clone = state.clone();
             let task_id_clone = task_id.clone();
             
             tokio::spawn(async move {
-                process_pdf(state_clone, task_id_clone, data.to_vec()).await;
+                process_pdf_parallel(state_clone, task_id_clone, data.to_vec()).await;
             });
             
-            return Ok(serde_json::json!({ "task_id": task_id }).to_string());
+            return Ok(Json(serde_json::json!({ "task_id": task_id })));
         }
     }
     
+    state.release_task_slot();
     Err((StatusCode::BAD_REQUEST, "No file uploaded".to_string()))
 }
 
-async fn process_pdf(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
-    // Step 1: Process PDF - extract text or render to images
+async fn process_pdf_parallel(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
+    // Ensure we release the slot when done
+    let _guard = TaskGuard { state: state.clone() };
+    
+    // Step 1: Render PDF to images
     let pages = match pdf::process_pdf_pages(&data) {
         Ok(p) => p,
         Err(e) => {
@@ -96,80 +117,161 @@ async fn process_pdf(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
     };
     
     let total_pages = pages.len();
-    let ocr_pages = pages.iter().filter(|p| p.image_base64.is_some()).count();
-    let text_pages = total_pages - ocr_pages;
-    
-    state.set_rendering(&task_id, total_pages, ocr_pages, text_pages);
-    
-    let mut recognized_texts: Vec<String> = Vec::with_capacity(total_pages);
-    let mut translated_texts: Vec<String> = Vec::with_capacity(total_pages);
-    
-    // Step 2: Get text for each page (extracted or OCR)
-    for page in &pages {
-        // Check if cancelled
-        if state.is_cancelled(&task_id) {
-            return;
-        }
-        
-        if let Some(ref text) = page.extracted_text {
-            // Text was extracted directly
-            state.set_recognizing(&task_id, page.page_num, total_pages, false);
-            state.add_log(&task_id, format!("第 {} 页: 文本提取成功", page.page_num));
-            recognized_texts.push(text.clone());
-        } else if let Some(ref image_base64) = page.image_base64 {
-            // Need OCR for this page
-            state.set_recognizing(&task_id, page.page_num, total_pages, true);
-            state.add_log(&task_id, format!("第 {} 页: 开始 OCR 识别", page.page_num));
-            
-            match translate::recognize_text(&state.config, image_base64).await {
-                Ok(text) => {
-                    state.add_log(&task_id, format!("第 {} 页: OCR 完成", page.page_num));
-                    recognized_texts.push(text);
-                }
-                Err(e) => {
-                    state.set_error(&task_id, format!("识别第 {} 页失败: {}", page.page_num, e));
-                    return;
-                }
-            }
-        } else {
-            // Neither text nor image - shouldn't happen
-            recognized_texts.push(String::new());
-        }
+    if total_pages == 0 {
+        state.set_error(&task_id, "PDF 没有页面".to_string());
+        return;
     }
     
-    // Step 3: Translate each page
-    for (i, text) in recognized_texts.iter().enumerate() {
-        // Check if cancelled
-        if state.is_cancelled(&task_id) {
-            return;
-        }
-        
-        let page_num = i + 1;
-        state.set_translating(&task_id, page_num, total_pages);
-        state.add_log(&task_id, format!("第 {} 页: 开始翻译", page_num));
-        
-        match translate::translate_text(&state.config, text).await {
-            Ok(translated) => {
-                state.add_log(&task_id, format!("第 {} 页: 翻译完成", page_num));
-                translated_texts.push(translated);
+    state.set_rendering(&task_id, total_pages);
+    state.set_processing(&task_id);
+    
+    // Step 2: Process all pages in parallel (OCR + Translate per page)
+    let results = process_pages_parallel(&state, &task_id, pages).await;
+    
+    // Check if cancelled
+    if state.is_cancelled(&task_id) {
+        return;
+    }
+    
+    // Collect results in order
+    let mut translated_texts: Vec<Option<String>> = vec![None; total_pages];
+    let mut has_error = false;
+    
+    for result in results {
+        match result {
+            Ok((page_num, text)) => {
+                translated_texts[page_num - 1] = Some(text);
             }
             Err(e) => {
-                state.set_error(&task_id, format!("翻译第 {} 页失败: {}", page_num, e));
-                return;
+                state.set_error(&task_id, e);
+                has_error = true;
+                break;
             }
         }
     }
     
-    // Step 4: Generate output PDF
+    if has_error || state.is_cancelled(&task_id) {
+        return;
+    }
+    
+    // Convert to Vec<String>
+    let texts: Vec<String> = translated_texts.into_iter()
+        .map(|t| t.unwrap_or_default())
+        .collect();
+    
+    // Step 3: Generate PDF
     state.set_generating(&task_id);
     
-    match pdf::generate_pdf(&translated_texts) {
+    match pdf::generate_pdf(&texts) {
         Ok(pdf_data) => {
             state.set_complete(&task_id, pdf_data);
         }
         Err(e) => {
             state.set_error(&task_id, format!("生成 PDF 失败: {}", e));
         }
+    }
+}
+
+async fn process_pages_parallel(
+    state: &Arc<AppState>,
+    task_id: &str,
+    pages: Vec<pdf::PdfPage>,
+) -> Vec<Result<(usize, String), String>> {
+    use tokio::task::JoinSet;
+    
+    let mut join_set: JoinSet<Result<(usize, String), String>> = JoinSet::new();
+    
+    for page in pages {
+        let state = state.clone();
+        let task_id = task_id.to_string();
+        let config = state.config.clone();
+        
+        join_set.spawn(async move {
+            // Check cancelled before starting
+            if state.is_cancelled(&task_id) {
+                return Err("任务已取消".to_string());
+            }
+            
+            let page_num = page.page_num;
+            
+            // OCR
+            let text = if let Some(ref image_base64) = page.image_base64 {
+                match translate::recognize_text(&config, image_base64).await {
+                    Ok(t) => {
+                        state.increment_ocr_done(&task_id);
+                        state.add_log(&task_id, format!("第 {} 页 OCR 完成", page_num));
+                        t
+                    }
+                    Err(e) => {
+                        return Err(format!("第 {} 页 OCR 失败: {}", page_num, e));
+                    }
+                }
+            } else if let Some(ref extracted) = page.extracted_text {
+                state.increment_ocr_done(&task_id);
+                extracted.clone()
+            } else {
+                state.increment_ocr_done(&task_id);
+                String::new()
+            };
+            
+            // Check cancelled before translate
+            if state.is_cancelled(&task_id) {
+                return Err("任务已取消".to_string());
+            }
+            
+            // Translate
+            match translate::translate_text(&config, &text).await {
+                Ok(translated) => {
+                    state.increment_translate_done(&task_id);
+                    state.add_log(&task_id, format!("第 {} 页翻译完成", page_num));
+                    Ok((page_num, translated))
+                }
+                Err(e) => {
+                    Err(format!("第 {} 页翻译失败: {}", page_num, e))
+                }
+            }
+        });
+    }
+    
+    // Collect results, abort all on first error or cancellation
+    let mut results = Vec::new();
+    let mut has_error = false;
+    
+    while let Some(result) = join_set.join_next().await {
+        // Check if cancelled
+        if state.is_cancelled(task_id) {
+            join_set.abort_all();
+            results.push(Err("任务已取消".to_string()));
+            break;
+        }
+        
+        match result {
+            Ok(Ok(r)) => results.push(Ok(r)),
+            Ok(Err(e)) => {
+                // First error - abort remaining tasks
+                if !has_error {
+                    has_error = true;
+                    join_set.abort_all();
+                }
+                results.push(Err(e));
+            }
+            Err(e) => {
+                results.push(Err(format!("任务执行错误: {}", e)));
+            }
+        }
+    }
+    
+    results
+}
+
+// Guard to release task slot on drop
+struct TaskGuard {
+    state: Arc<AppState>,
+}
+
+impl Drop for TaskGuard {
+    fn drop(&mut self) {
+        self.state.release_task_slot();
     }
 }
 
@@ -182,6 +284,12 @@ async fn cancel(
     } else {
         (StatusCode::NOT_FOUND, "not found or already done")
     }
+}
+
+async fn list_tasks(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<state::TaskSummary>> {
+    Json(state.get_all_tasks())
 }
 
 async fn progress(
@@ -205,7 +313,7 @@ async fn progress(
                 yield Ok(event);
                 break;
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         }
     };
     
