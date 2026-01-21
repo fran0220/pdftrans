@@ -1,0 +1,26 @@
+[package]
+name = "pdftrans"
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync", "process"] }
+tokio-stream = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+parking_lot = "0.12"
+tower-http = { version = "0.6", features = ["cors"] }
+async-stream = "0.3"
+base64 = "0.22"
+tempfile = "3"
+lopdf = "0.34"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
