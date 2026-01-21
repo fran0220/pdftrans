@@ -30,6 +30,7 @@ async fn main() {
         .route("/", get(index))
         .route("/upload", post(upload))
         .route("/progress/{task_id}", get(progress))
+        .route("/cancel/{task_id}", post(cancel))
         .route("/download/{task_id}", get(download))
         .layer(CorsLayer::very_permissive())
         .with_state(state);
@@ -105,6 +106,11 @@ async fn process_pdf(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
     
     // Step 2: Get text for each page (extracted or OCR)
     for page in &pages {
+        // Check if cancelled
+        if state.is_cancelled(&task_id) {
+            return;
+        }
+        
         if let Some(ref text) = page.extracted_text {
             // Text was extracted directly
             state.set_recognizing(&task_id, page.page_num, total_pages, false);
@@ -133,6 +139,11 @@ async fn process_pdf(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
     
     // Step 3: Translate each page
     for (i, text) in recognized_texts.iter().enumerate() {
+        // Check if cancelled
+        if state.is_cancelled(&task_id) {
+            return;
+        }
+        
         let page_num = i + 1;
         state.set_translating(&task_id, page_num, total_pages);
         state.add_log(&task_id, format!("第 {} 页: 开始翻译", page_num));
@@ -159,6 +170,17 @@ async fn process_pdf(state: Arc<AppState>, task_id: String, data: Vec<u8>) {
         Err(e) => {
             state.set_error(&task_id, format!("生成 PDF 失败: {}", e));
         }
+    }
+}
+
+async fn cancel(
+    State(state): State<Arc<AppState>>,
+    Path(task_id): Path<String>,
+) -> impl IntoResponse {
+    if state.cancel_task(&task_id) {
+        (StatusCode::OK, "cancelled")
+    } else {
+        (StatusCode::NOT_FOUND, "not found or already done")
     }
 }
 

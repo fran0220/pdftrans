@@ -46,6 +46,7 @@ impl TaskProgress {
 pub struct TaskData {
     pub progress: TaskProgress,
     pub pdf_data: Option<Arc<Vec<u8>>>,
+    pub cancelled: bool,
     // Timing stats
     started_at: u64,
     page_times: Vec<u64>,  // Time per page in ms
@@ -87,10 +88,28 @@ impl AppState {
                 logs: vec![LogEntry { ts: now, msg: "任务开始".to_string() }],
             },
             pdf_data: None,
+            cancelled: false,
             started_at: now,
             page_times: Vec::new(),
         };
         self.tasks.write().insert(task_id.to_string(), task);
+    }
+
+    pub fn cancel_task(&self, task_id: &str) -> bool {
+        if let Some(task) = self.tasks.write().get_mut(task_id) {
+            if !task.progress.is_done() {
+                task.cancelled = true;
+                task.progress.status = TaskStatus::Error;
+                task.progress.message = "任务已取消".to_string();
+                task.progress.logs.push(LogEntry { ts: now_ms(), msg: "用户取消任务".to_string() });
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn is_cancelled(&self, task_id: &str) -> bool {
+        self.tasks.read().get(task_id).map(|t| t.cancelled).unwrap_or(false)
     }
 
     pub fn set_rendering(&self, task_id: &str, total_pages: usize, ocr_pages: usize, text_pages: usize) {

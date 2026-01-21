@@ -202,6 +202,20 @@
             transition: background 0.3s;
         }
         .download-btn:hover { background: #218838; }
+        .cancel-btn {
+            display: none;
+            margin-top: 15px;
+            width: 100%;
+            padding: 10px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .cancel-btn:hover { background: #c82333; }
     </style>
 </head>
 <body>
@@ -263,6 +277,7 @@
             </details>
             
             <div class="status" id="status"></div>
+            <button class="cancel-btn" id="cancelBtn">取消任务</button>
         </div>
         
         <button class="download-btn" id="downloadBtn">下载翻译后的 PDF</button>
@@ -284,9 +299,11 @@
         const logContent = document.getElementById('logContent');
         const status = document.getElementById('status');
         const downloadBtn = document.getElementById('downloadBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
         const steps = document.querySelectorAll('.step');
         
         let currentTaskId = null;
+        let currentEventSource = null;
         const stepOrder = ['Rendering', 'Recognizing', 'Translating', 'Generating', 'Complete'];
 
         uploadArea.addEventListener('click', () => fileInput.click());
@@ -358,6 +375,7 @@
             eta.textContent = '';
             stats.style.display = 'none';
             logContent.innerHTML = '';
+            cancelBtn.style.display = 'block';
             steps.forEach(s => { s.classList.remove('active', 'done'); s.querySelector('.step-icon').textContent = s.querySelector('.step-icon').textContent.replace('✓', ''); });
             
             const formData = new FormData();
@@ -384,7 +402,8 @@
         }
 
         function listenProgress(taskId) {
-            const eventSource = new EventSource(`/progress/${taskId}`);
+            currentEventSource = new EventSource(`/progress/${taskId}`);
+            const eventSource = currentEventSource;
             
             eventSource.onmessage = (e) => {
                 const data = JSON.parse(e.data);
@@ -418,19 +437,23 @@
                 
                 if (data.status === 'Complete') {
                     eventSource.close();
+                    currentEventSource = null;
                     status.textContent = '✅ ' + data.message;
                     status.className = 'status success';
                     progressFill.style.width = '100%';
                     progressPercent.textContent = '100%';
                     eta.textContent = '';
+                    cancelBtn.style.display = 'none';
                     downloadBtn.style.display = 'block';
                     // Mark all steps done
                     steps.forEach(s => { s.classList.remove('active'); s.classList.add('done'); s.querySelector('.step-icon').textContent = '✓'; });
                 } else if (data.status === 'Error') {
                     eventSource.close();
+                    currentEventSource = null;
                     status.textContent = '❌ ' + data.message;
                     status.className = 'status error';
                     eta.textContent = '';
+                    cancelBtn.style.display = 'none';
                 }
             };
             
@@ -444,6 +467,26 @@
         downloadBtn.addEventListener('click', () => {
             if (currentTaskId) {
                 window.location.href = `/download/${currentTaskId}`;
+            }
+        });
+
+        cancelBtn.addEventListener('click', async () => {
+            if (currentTaskId) {
+                cancelBtn.disabled = true;
+                cancelBtn.textContent = '取消中...';
+                try {
+                    await fetch(`/cancel/${currentTaskId}`, { method: 'POST' });
+                    if (currentEventSource) {
+                        currentEventSource.close();
+                        currentEventSource = null;
+                    }
+                    status.textContent = '⚠️ 任务已取消';
+                    status.className = 'status error';
+                    cancelBtn.style.display = 'none';
+                } catch (e) {
+                    cancelBtn.disabled = false;
+                    cancelBtn.textContent = '取消任务';
+                }
             }
         });
     </script>

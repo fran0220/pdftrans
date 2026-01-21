@@ -149,16 +149,15 @@ async fn call_api(config: &Config, request: &ChatRequest<'_>) -> Result<String, 
         .await
         .map_err(|e| format!("请求失败: {}", e))?;
     
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    
+    if !status.is_success() {
         return Err(format!("API 错误 {}: {}", status, body));
     }
     
-    let chat_response: ChatResponse = response
-        .json()
-        .await
-        .map_err(|e| format!("解析失败: {}", e))?;
+    let chat_response: ChatResponse = serde_json::from_str(&body)
+        .map_err(|e| format!("解析失败: {} - 响应: {}", e, &body[..body.len().min(500)]))?;
     
     chat_response
         .choices
