@@ -623,9 +623,39 @@
                 </div>`;
             }).join('');
             
-            // 添加点击事件
+            // 添加点击事件（区分点击和拖动滚动）
             pageCardsContainer.querySelectorAll('.page-card-content[data-page]').forEach(el => {
-                el.addEventListener('click', () => expandPageContent(el));
+                let startX, startY, isDragging = false;
+                
+                el.addEventListener('mousedown', (e) => {
+                    startX = e.clientX;
+                    startY = e.clientY;
+                    isDragging = false;
+                });
+                
+                el.addEventListener('mousemove', (e) => {
+                    if (startX !== undefined) {
+                        const dx = Math.abs(e.clientX - startX);
+                        const dy = Math.abs(e.clientY - startY);
+                        if (dx > 5 || dy > 5) {
+                            isDragging = true;
+                        }
+                    }
+                });
+                
+                el.addEventListener('click', (e) => {
+                    if (isDragging) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                    expandPageContent(el);
+                });
+                
+                el.addEventListener('mouseup', () => {
+                    startX = undefined;
+                    startY = undefined;
+                });
             });
         }
         
