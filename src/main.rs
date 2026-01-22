@@ -17,14 +17,15 @@ use tower_http::cors::CorsLayer;
 
 
 use crate::state::{AppState, MAX_CONCURRENT_TASKS, PageDetail};
+use crate::translate::ModelFallbackState;
 
 #[tokio::main]
 async fn main() {
     let config = config::Config::from_env();
     println!("PDF Translator V2 (Parallel) starting...");
     println!("API Base URL: {}", config.base_url);
-    println!("OCR Model: {}", config.ocr_model);
-    println!("Translate Model: {}", config.translate_model);
+    println!("OCR Model: {} (fallback: {:?})", config.ocr_model, config.ocr_model_fallback);
+    println!("Translate Model: {} (fallback: {:?})", config.translate_model, config.translate_model_fallback);
     println!("Max concurrent tasks: {}", MAX_CONCURRENT_TASKS);
     
     let state = Arc::new(AppState::new(config));
@@ -135,8 +136,11 @@ async fn process_pdf_parallel(state: Arc<AppState>, task_id: String, data: Vec<u
     state.set_rendering(&task_id, total_pages);
     state.set_processing(&task_id);
     
+    // Create fallback state for this task
+    let fallback_state = Arc::new(ModelFallbackState::new());
+    
     // Step 2: Process all pages in parallel (OCR + Translate per page)
-    let results = process_pages_parallel(&state, &task_id, pages).await;
+    let results = process_pages_parallel(&state, &task_id, pages, fallback_state).await;
     
     // Check if cancelled
     if state.is_cancelled(&task_id) {
@@ -186,6 +190,7 @@ async fn process_pages_parallel(
     state: &Arc<AppState>,
     task_id: &str,
     pages: Vec<pdf::PdfPage>,
+    fallback_state: Arc<ModelFallbackState>,
 ) -> Vec<Result<(usize, String), String>> {
     use tokio::task::JoinSet;
     
@@ -210,6 +215,7 @@ async fn process_pages_parallel(
             let state = state.clone();
             let task_id = task_id.to_string();
             let config = state.config.clone();
+            let fallback = fallback_state.clone();
             
             ocr_set.spawn(async move {
                 if state.is_cancelled(&task_id) {
@@ -221,7 +227,7 @@ async fn process_pages_parallel(
                 let page_task_id = format!("{}-p{}", task_id, page_num);
                 
                 let text = if let Some(ref image_base64) = page.image_base64 {
-                    match translate::recognize_text(&config, image_base64, &page_task_id).await {
+                    match translate::recognize_text(&config, image_base64, &page_task_id, &fallback).await {
                         Ok(t) => {
                             let _ = state::save_page_ocr(&task_id, page_num, &t);
                             let preview = t.chars().take(300).collect::<String>();
@@ -288,6 +294,7 @@ async fn process_pages_parallel(
             let state = state.clone();
             let task_id = task_id.to_string();
             let config = state.config.clone();
+            let fallback = fallback_state.clone();
             
             translate_set.spawn(async move {
                 if state.is_cancelled(&task_id) {
@@ -297,7 +304,7 @@ async fn process_pages_parallel(
                 state.start_page_translate(&task_id, page_num);
                 let page_task_id = format!("{}-p{}", task_id, page_num);
                 
-                match translate::translate_text(&config, &text, &page_task_id).await {
+                match translate::translate_text(&config, &text, &page_task_id, &fallback).await {
                     Ok(translated) => {
                         let _ = state::save_page_translated(&task_id, page_num, &translated);
                         let char_count = translated.chars().count();
@@ -454,8 +461,11 @@ async fn process_retry(state: Arc<AppState>, task_id: String, pdf_bytes: Vec<u8>
     state.init_retry_progress(&task_id, completed_count, total_pages);
     state.add_log(&task_id, format!("继续处理，已完成 {}/{} 页", completed_count, total_pages));
     
+    // Create fallback state for this task
+    let fallback_state = Arc::new(ModelFallbackState::new());
+    
     // Process pending pages
-    let results = process_pages_parallel(&state, &task_id, pending_pages).await;
+    let results = process_pages_parallel(&state, &task_id, pending_pages, fallback_state).await;
     
     // Check if cancelled
     if state.is_cancelled(&task_id) {

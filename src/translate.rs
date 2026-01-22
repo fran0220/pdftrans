@@ -2,10 +2,62 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
 
 use crate::config::Config;
+
+const FALLBACK_THRESHOLD: u32 = 3;
+
+pub struct OpFallbackState {
+    consecutive_failures: AtomicU32,
+    using_fallback: AtomicBool,
+}
+
+impl OpFallbackState {
+    pub fn new() -> Self {
+        Self {
+            consecutive_failures: AtomicU32::new(0),
+            using_fallback: AtomicBool::new(false),
+        }
+    }
+    
+    pub fn is_using_fallback(&self) -> bool {
+        self.using_fallback.load(Ordering::Relaxed)
+    }
+    
+    fn record_success(&self) {
+        self.consecutive_failures.store(0, Ordering::Relaxed);
+    }
+    
+    fn record_failure(&self, has_fallback: bool) -> bool {
+        if self.using_fallback.load(Ordering::Relaxed) {
+            return false;
+        }
+        
+        let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
+        if failures >= FALLBACK_THRESHOLD && has_fallback {
+            self.using_fallback.store(true, Ordering::Relaxed);
+            return true;
+        }
+        false
+    }
+}
+
+pub struct ModelFallbackState {
+    pub ocr: OpFallbackState,
+    pub translate: OpFallbackState,
+}
+
+impl ModelFallbackState {
+    pub fn new() -> Self {
+        Self {
+            ocr: OpFallbackState::new(),
+            translate: OpFallbackState::new(),
+        }
+    }
+}
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
@@ -70,8 +122,13 @@ struct ResponseMessage {
     content: String,
 }
 
-/// Use vision model to recognize text from image
-pub async fn recognize_text(config: &Config, image_base64: &str, task_id: &str) -> Result<String, String> {
+/// Use vision model to recognize text from image (with fallback support)
+pub async fn recognize_text(
+    config: &Config, 
+    image_base64: &str, 
+    task_id: &str,
+    fallback_state: &ModelFallbackState,
+) -> Result<String, String> {
     let prompt = r#"请仔细识别这张图片中的所有文本内容。
 
 要求：
@@ -84,8 +141,14 @@ pub async fn recognize_text(config: &Config, image_base64: &str, task_id: &str) 
 
 请开始识别："#;
 
+    let model = if fallback_state.ocr.is_using_fallback() {
+        config.ocr_model_fallback.as_deref().unwrap_or(&config.ocr_model)
+    } else {
+        &config.ocr_model
+    };
+
     let request = ChatRequest {
-        model: &config.ocr_model,
+        model,
         messages: vec![Message {
             role: "user".to_string(),
             content: MessageContent::Multimodal(vec![
@@ -100,11 +163,39 @@ pub async fn recognize_text(config: &Config, image_base64: &str, task_id: &str) 
         max_tokens: Some(8192),
     };
 
-    with_retry(|| call_api_inner(config, &request), 3, task_id).await
+    let result = with_retry(|| call_api_inner(config, &request), 3, task_id).await;
+    
+    match &result {
+        Ok(_) => {
+            fallback_state.ocr.record_success();
+        }
+        Err(_) => {
+            let switched = fallback_state.ocr.record_failure(config.ocr_model_fallback.is_some());
+            if switched {
+                eprintln!("[{}] OCR 主模型连续失败 {} 次，切换到备用模型: {:?}", 
+                    task_id, FALLBACK_THRESHOLD, config.ocr_model_fallback);
+                // Retry immediately with fallback model
+                let fallback_model = config.ocr_model_fallback.as_deref().unwrap();
+                let fallback_request = ChatRequest {
+                    model: fallback_model,
+                    messages: request.messages,
+                    max_tokens: request.max_tokens,
+                };
+                return with_retry(|| call_api_inner(config, &fallback_request), 3, task_id).await;
+            }
+        }
+    }
+    
+    result
 }
 
-/// Use translation model to translate text to Chinese
-pub async fn translate_text(config: &Config, text: &str, task_id: &str) -> Result<String, String> {
+/// Use translation model to translate text to Chinese (with fallback support)
+pub async fn translate_text(
+    config: &Config, 
+    text: &str, 
+    task_id: &str,
+    fallback_state: &ModelFallbackState,
+) -> Result<String, String> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(String::new());
@@ -129,8 +220,14 @@ r#"你是一个专业的多语言翻译专家。请将以下内容翻译成简�
 原文内容：
 {}"#, trimmed);
 
+    let model = if fallback_state.translate.is_using_fallback() {
+        config.translate_model_fallback.as_deref().unwrap_or(&config.translate_model)
+    } else {
+        &config.translate_model
+    };
+
     let request = ChatRequest {
-        model: &config.translate_model,
+        model,
         messages: vec![Message {
             role: "user".to_string(),
             content: MessageContent::Text(prompt),
@@ -138,7 +235,30 @@ r#"你是一个专业的多语言翻译专家。请将以下内容翻译成简�
         max_tokens: Some(8192),
     };
 
-    with_retry(|| call_api_inner(config, &request), 3, task_id).await
+    let result = with_retry(|| call_api_inner(config, &request), 3, task_id).await;
+    
+    match &result {
+        Ok(_) => {
+            fallback_state.translate.record_success();
+        }
+        Err(_) => {
+            let switched = fallback_state.translate.record_failure(config.translate_model_fallback.is_some());
+            if switched {
+                eprintln!("[{}] 翻译主模型连续失败 {} 次，切换到备用模型: {:?}", 
+                    task_id, FALLBACK_THRESHOLD, config.translate_model_fallback);
+                // Retry immediately with fallback model
+                let fallback_model = config.translate_model_fallback.as_deref().unwrap();
+                let fallback_request = ChatRequest {
+                    model: fallback_model,
+                    messages: request.messages,
+                    max_tokens: request.max_tokens,
+                };
+                return with_retry(|| call_api_inner(config, &fallback_request), 3, task_id).await;
+            }
+        }
+    }
+    
+    result
 }
 
 

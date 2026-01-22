@@ -4,6 +4,8 @@ pub struct Config {
     pub api_key: String,
     pub ocr_model: String,
     pub translate_model: String,
+    pub ocr_model_fallback: Option<String>,
+    pub translate_model_fallback: Option<String>,
 }
 
 impl Config {
@@ -17,6 +19,8 @@ impl Config {
                 .unwrap_or_else(|_| "gemini-3-flash-preview".to_string()),
             translate_model: std::env::var("MODEL")
                 .unwrap_or_else(|_| "gpt-5.2".to_string()),
+            ocr_model_fallback: std::env::var("OCR_MODEL_FALLBACK").ok().filter(|s| !s.is_empty()),
+            translate_model_fallback: std::env::var("MODEL_FALLBACK").ok().filter(|s| !s.is_empty()),
         }
     }
 }
