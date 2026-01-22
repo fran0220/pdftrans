@@ -4,6 +4,7 @@ use std::process::Command;
 use tempfile::TempDir;
 use std::fs;
 
+#[derive(Clone)]
 pub struct PdfPage {
     pub page_num: usize,
     pub image_base64: Option<String>,  // None if text extraction succeeded
@@ -69,6 +70,7 @@ pub fn process_pdf_pages(data: &[u8]) -> Result<Vec<PdfPage>, String> {
 }
 
 /// Extract text from a single page
+#[allow(dead_code)]
 fn extract_page_text(doc: &Document, page_num: usize) -> String {
     let page_id = match doc.get_pages().get(&(page_num as u32)) {
         Some(id) => *id,
@@ -85,6 +87,7 @@ fn extract_page_text(doc: &Document, page_num: usize) -> String {
 }
 
 /// Extract readable text from PDF content stream
+#[allow(dead_code)]
 fn extract_text_from_content(content: &[u8], doc: &Document) -> String {
     let content_str = String::from_utf8_lossy(content);
     let mut text = String::new();
@@ -122,6 +125,7 @@ fn extract_text_from_content(content: &[u8], doc: &Document) -> String {
 }
 
 /// Extract text from PDF text operators
+#[allow(dead_code)]
 fn extract_text_operator(line: &str, _doc: &Document) -> Option<String> {
     let line = line.trim();
     
@@ -190,6 +194,7 @@ fn extract_text_operator(line: &str, _doc: &Document) -> Option<String> {
 }
 
 /// Decode PDF string escapes
+#[allow(dead_code)]
 fn decode_pdf_string(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
@@ -215,6 +220,7 @@ fn decode_pdf_string(s: &str) -> String {
 }
 
 /// Decode hex string to text
+#[allow(dead_code)]
 fn decode_hex_string(hex: &str) -> Option<String> {
     let hex = hex.replace(" ", "");
     if hex.len() % 4 == 0 {
@@ -242,6 +248,7 @@ fn decode_hex_string(hex: &str) -> Option<String> {
 }
 
 /// Check if extracted text is valid (not empty, not garbled)
+#[allow(dead_code)]
 fn is_text_valid(text: &str) -> bool {
     let text = text.trim();
     

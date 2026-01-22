@@ -29,43 +29,6 @@
             font-size: 14px;
         }
         
-        /* Task list */
-        .task-list {
-            margin-bottom: 20px;
-        }
-        .task-card {
-            background: white;
-            border-radius: 8px;
-            padding: 12px 15px;
-            margin-bottom: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .task-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .task-card.active { border: 2px solid #007bff; }
-        .task-card.error { border-left: 4px solid #dc3545; }
-        .task-card.complete { border-left: 4px solid #28a745; }
-        .task-card.processing { border-left: 4px solid #007bff; }
-        .task-info { flex: 1; }
-        .task-filename { font-weight: 500; color: #333; font-size: 14px; }
-        .task-status { font-size: 12px; color: #666; margin-top: 4px; }
-        .task-progress-mini {
-            width: 60px;
-            height: 6px;
-            background: #e0e0e0;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-        .task-progress-mini-fill {
-            height: 100%;
-            background: #007bff;
-            transition: width 0.3s;
-        }
-        
         /* Upload area */
         .container {
             background: white;
@@ -163,6 +126,8 @@
         .btn-cancel:hover { background: #c82333; }
         .btn-download { background: #28a745; color: white; display: none; }
         .btn-download:hover { background: #218838; }
+        .btn-retry { background: #fd7e14; color: white; display: none; }
+        .btn-retry:hover { background: #e67e22; }
         
         .status {
             margin-top: 10px;
@@ -171,15 +136,216 @@
         }
         .status.success { color: #28a745; }
         .status.error { color: #dc3545; }
+
+        /* Log Drawer */
+        .log-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 999;
+        }
+        .log-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .log-drawer {
+            position: fixed;
+            right: 0;
+            top: 0;
+            height: 100%;
+            width: 340px;
+            background: white;
+            box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+        .log-drawer.open {
+            transform: translateX(0);
+        }
+        .drawer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            background: #f8f9fa;
+        }
+        .drawer-header h3 {
+            margin: 0;
+            font-size: 16px;
+            color: #333;
+        }
+        .drawer-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            line-height: 1;
+        }
+        .drawer-close:hover { color: #333; }
+        .drawer-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        .drawer-section {
+            margin-bottom: 20px;
+        }
+        .drawer-section h4 {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Page Cards */
+        .page-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .page-card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .page-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .page-card-header .page-num {
+            font-weight: 600;
+            color: #333;
+        }
+        .page-card-body {
+            padding: 12px;
+        }
+        .page-card-section {
+            margin-bottom: 10px;
+        }
+        .page-card-section:last-child {
+            margin-bottom: 0;
+        }
+        .page-card-label {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .page-card-label .stats {
+            color: #999;
+        }
+        .page-card-content {
+            font-size: 12px;
+            color: #333;
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+            max-height: 80px;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.4;
+            cursor: pointer;
+            transition: max-height 0.3s ease;
+            overscroll-behavior: contain;
+        }
+        .page-card-content:hover {
+            background: #e9ecef;
+        }
+        .page-card-content.expanded {
+            max-height: 400px;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .page-card-content.empty {
+            color: #999;
+            font-style: italic;
+            cursor: default;
+        }
+        .page-card-content.loading {
+            color: #666;
+            font-style: italic;
+        }
+        .expand-hint {
+            font-size: 10px;
+            color: #999;
+            margin-left: 8px;
+        }
+        .page-card-error {
+            color: #dc3545;
+            font-size: 12px;
+            padding: 8px;
+            background: #f8d7da;
+            border-radius: 4px;
+        }
+        .page-status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .page-status.pending { background: #e9ecef; color: #666; }
+        .page-status.ocr { background: #fff3cd; color: #856404; }
+        .page-status.translating { background: #cce5ff; color: #004085; }
+        .page-status.done { background: #d4edda; color: #155724; }
+        .page-status.error { background: #f8d7da; color: #721c24; }
+
+        /* Drawer Log List */
+        .drawer-log-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 10px;
+        }
+        .drawer-log-entry {
+            padding: 3px 0;
+            font-size: 11px;
+            font-family: monospace;
+            color: #555;
+            border-bottom: 1px solid #eee;
+        }
+        .drawer-log-entry:last-child { border-bottom: none; }
+
+        /* Log Button */
+        .btn-log {
+            background: #6c757d;
+            color: white;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-log:hover { background: #5a6268; }
+
+        @media (max-width: 600px) {
+            .log-drawer { width: 100%; }
+        }
     </style>
 </head>
 <body>
     <div class="main-container">
         <h1>📄 PDF 多语言翻译器</h1>
         <p class="subtitle">支持英文、日文、韩文等 → 中文 | 并行处理</p>
-        
-        <!-- Task list -->
-        <div class="task-list" id="taskList"></div>
         
         <!-- Main container -->
         <div class="container">
@@ -192,7 +358,10 @@
             <div class="progress-section" id="progressSection">
                 <div class="progress-header">
                     <span class="progress-title" id="progressTitle">处理中...</span>
-                    <span id="progressPercent">0%</span>
+                    <span>
+                        <button class="btn-log" id="logBtn" title="查看详细日志">📋</button>
+                        <span id="progressPercent">0%</span>
+                    </span>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill"></div>
@@ -212,8 +381,30 @@
                 
                 <div class="btn-row">
                     <button class="btn btn-cancel" id="cancelBtn">取消</button>
+                    <button class="btn btn-retry" id="retryBtn">重试</button>
                     <button class="btn btn-download" id="downloadBtn">下载 PDF</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Drawer Overlay -->
+    <div class="log-overlay" id="logOverlay"></div>
+    
+    <!-- Log Drawer -->
+    <div class="log-drawer" id="logDrawer">
+        <div class="drawer-header">
+            <h3>📋 处理详情</h3>
+            <button class="drawer-close" id="drawerClose">&times;</button>
+        </div>
+        <div class="drawer-body">
+            <div class="drawer-section">
+                <h4>页面处理状态</h4>
+                <div class="page-cards" id="pageCardsContainer"></div>
+            </div>
+            <div class="drawer-section">
+                <h4>系统日志</h4>
+                <div class="drawer-log-list" id="drawerLogList"></div>
             </div>
         </div>
     </div>
@@ -232,11 +423,20 @@
         const status = document.getElementById('status');
         const cancelBtn = document.getElementById('cancelBtn');
         const downloadBtn = document.getElementById('downloadBtn');
-        const taskList = document.getElementById('taskList');
+        const logBtn = document.getElementById('logBtn');
+        const retryBtn = document.getElementById('retryBtn');
+        const logOverlay = document.getElementById('logOverlay');
+        const logDrawer = document.getElementById('logDrawer');
+        const drawerClose = document.getElementById('drawerClose');
+        const pageCardsContainer = document.getElementById('pageCardsContainer');
+        const drawerLogList = document.getElementById('drawerLogList');
         
         let currentTaskId = null;
         let currentEventSource = null;
-        let tasks = new Map();
+        let connectAttempt = 0;
+        let reconnectTimer = null;
+        let isManuallyClosed = false;
+        const MAX_RECONNECT_ATTEMPTS = 5;
 
         // Event listeners
         uploadArea.addEventListener('click', () => fileInput.click());
@@ -257,19 +457,241 @@
 
         cancelBtn.addEventListener('click', async () => {
             if (currentTaskId) {
-                await fetch(`/cancel/${currentTaskId}`, { method: 'POST' });
+                isManuallyClosed = true;
+                clearReconnectTimer();
                 if (currentEventSource) {
                     currentEventSource.close();
                     currentEventSource = null;
                 }
+                cancelBtn.disabled = true;
+                try {
+                    await fetch(`/cancel/${currentTaskId}`, { method: 'POST' });
+                    status.textContent = '已取消';
+                    status.className = 'status';
+                    cancelBtn.style.display = 'none';
+                    retryBtn.style.display = 'none';
+                } catch (e) {
+                    status.textContent = '取消失败: ' + e.message;
+                    status.className = 'status error';
+                }
+                cancelBtn.disabled = false;
             }
         });
+
+        retryBtn.addEventListener('click', async () => {
+            if (currentTaskId) {
+                // 立即更新 UI（乐观更新）
+                retryBtn.disabled = true;
+                retryBtn.style.display = 'none';
+                cancelBtn.style.display = 'block';
+                status.textContent = '正在重试...';
+                status.className = 'status';
+                progressDetail.textContent = '准备重新处理...';
+                
+                try {
+                    const response = await fetch(`/retry/${currentTaskId}`, { method: 'POST' });
+                    if (response.ok) {
+                        // 重置状态并监听进度
+                        isManuallyClosed = false;
+                        connectAttempt = 0;
+                        pageDetailCache.clear(); // 清除页面缓存
+                        listenProgress(currentTaskId);
+                    } else {
+                        const text = await response.text();
+                        status.textContent = '❌ 重试失败: ' + text;
+                        status.className = 'status error';
+                        cancelBtn.style.display = 'none';
+                        retryBtn.style.display = 'block';
+                    }
+                } catch (e) {
+                    status.textContent = '❌ 重试失败: ' + e.message;
+                    status.className = 'status error';
+                    cancelBtn.style.display = 'none';
+                    retryBtn.style.display = 'block';
+                }
+                retryBtn.disabled = false;
+            }
+        });
+
+        window.addEventListener('online', () => {
+            if (currentTaskId && !currentEventSource && !isManuallyClosed) {
+                clearReconnectTimer();
+                connectAttempt = 0;
+                listenProgress(currentTaskId);
+            }
+        });
+
+        function clearReconnectTimer() {
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+        }
 
         downloadBtn.addEventListener('click', () => {
             if (currentTaskId) {
                 window.location.href = `/download/${currentTaskId}`;
             }
         });
+
+        // Drawer functions
+        function openDrawer() {
+            logOverlay.classList.add('open');
+            logDrawer.classList.add('open');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeDrawer() {
+            logOverlay.classList.remove('open');
+            logDrawer.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+
+        logBtn.addEventListener('click', openDrawer);
+        drawerClose.addEventListener('click', closeDrawer);
+        logOverlay.addEventListener('click', closeDrawer);
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && logDrawer.classList.contains('open')) {
+                closeDrawer();
+            }
+        });
+
+        // 缓存加载的完整页面内容
+        const pageDetailCache = new Map();
+        
+        function renderPageSummaries(summaries) {
+            if (!summaries || summaries.length === 0) {
+                pageCardsContainer.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">暂无数据</div>';
+                return;
+            }
+            
+            const statusLabels = {
+                'pending': '等待中',
+                'ocr': 'OCR 识别中',
+                'translating': '翻译中',
+                'done': '已完成',
+                'error': '失败'
+            };
+            
+            pageCardsContainer.innerHTML = summaries.map(ps => {
+                const ocrStats = ps.ocr_duration_ms != null 
+                    ? `${ps.ocr_chars || 0} 字 · ${ps.ocr_duration_ms}ms`
+                    : '';
+                const transStats = ps.translate_duration_ms != null 
+                    ? `${ps.translated_chars || 0} 字 · ${ps.translate_duration_ms}ms`
+                    : '';
+                
+                const hasOcr = ps.ocr_text_preview || ps.status === 'done';
+                const hasTrans = ps.translated_text_preview || ps.status === 'done';
+                const expandHint = (hasOcr || hasTrans) ? '<span class="expand-hint">点击展开</span>' : '';
+                
+                const ocrContent = ps.ocr_text_preview 
+                    ? `<div class="page-card-content" data-task="${currentTaskId}" data-page="${ps.page_num}" data-type="ocr">${escapeHtml(ps.ocr_text_preview)}${ps.ocr_chars > 300 ? '...' : ''}</div>`
+                    : `<div class="page-card-content empty">${ps.status === 'pending' ? '等待处理' : ps.status === 'ocr' ? '识别中...' : '无内容'}</div>`;
+                
+                const transContent = ps.translated_text_preview 
+                    ? `<div class="page-card-content" data-task="${currentTaskId}" data-page="${ps.page_num}" data-type="trans">${escapeHtml(ps.translated_text_preview)}${ps.translated_chars > 300 ? '...' : ''}</div>`
+                    : `<div class="page-card-content empty">${['pending', 'ocr'].includes(ps.status) ? '等待翻译' : ps.status === 'translating' ? '翻译中...' : '无内容'}</div>`;
+                
+                const errorSection = ps.error 
+                    ? `<div class="page-card-section"><div class="page-card-error">❌ ${escapeHtml(ps.error)}</div></div>` 
+                    : '';
+                
+                return `<div class="page-card">
+                    <div class="page-card-header">
+                        <span class="page-num">第 ${ps.page_num} 页</span>
+                        <span class="page-status ${ps.status}">${statusLabels[ps.status] || ps.status}</span>
+                    </div>
+                    <div class="page-card-body">
+                        <div class="page-card-section">
+                            <div class="page-card-label">
+                                <span>📖 OCR 识别结果${expandHint}</span>
+                                <span class="stats">${ocrStats}</span>
+                            </div>
+                            ${ocrContent}
+                        </div>
+                        <div class="page-card-section">
+                            <div class="page-card-label">
+                                <span>🌐 翻译结果${expandHint}</span>
+                                <span class="stats">${transStats}</span>
+                            </div>
+                            ${transContent}
+                        </div>
+                        ${errorSection}
+                    </div>
+                </div>`;
+            }).join('');
+            
+            // 添加点击事件
+            pageCardsContainer.querySelectorAll('.page-card-content[data-page]').forEach(el => {
+                el.addEventListener('click', () => expandPageContent(el));
+            });
+        }
+        
+        async function expandPageContent(el) {
+            const taskId = el.dataset.task;
+            const pageNum = el.dataset.page;
+            const type = el.dataset.type;
+            
+            if (el.classList.contains('expanded')) {
+                el.classList.remove('expanded');
+                // 恢复预览
+                const cache = pageDetailCache.get(`${taskId}-${pageNum}`);
+                if (cache) {
+                    const text = type === 'ocr' ? cache.ocr_text : cache.translated_text;
+                    const preview = text.substring(0, 300);
+                    el.textContent = preview + (text.length > 300 ? '...' : '');
+                }
+                return;
+            }
+            
+            // 检查缓存
+            const cacheKey = `${taskId}-${pageNum}`;
+            let detail = pageDetailCache.get(cacheKey);
+            
+            if (!detail) {
+                el.classList.add('loading');
+                el.textContent = '加载中...';
+                try {
+                    const resp = await fetch(`/tasks/${taskId}/pages/${pageNum}`);
+                    if (resp.ok) {
+                        detail = await resp.json();
+                        pageDetailCache.set(cacheKey, detail);
+                    } else {
+                        el.textContent = '加载失败';
+                        el.classList.remove('loading');
+                        return;
+                    }
+                } catch (e) {
+                    el.textContent = '加载失败: ' + e.message;
+                    el.classList.remove('loading');
+                    return;
+                }
+                el.classList.remove('loading');
+            }
+            
+            const fullText = type === 'ocr' ? detail.ocr_text : detail.translated_text;
+            el.textContent = fullText || '无内容';
+            el.classList.add('expanded');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function renderDrawerLogs(logs) {
+            if (!logs || logs.length === 0) {
+                drawerLogList.innerHTML = '<div style="color:#999;text-align:center;">暂无日志</div>';
+                return;
+            }
+            drawerLogList.innerHTML = logs.map(l => 
+                `<div class="drawer-log-entry">${new Date(l.ts).toLocaleTimeString()} - ${l.msg}</div>`
+            ).join('');
+            drawerLogList.scrollTop = drawerLogList.scrollHeight;
+        }
 
         async function handleFile(file) {
             const formData = new FormData();
@@ -286,11 +708,9 @@
                 
                 const data = await response.json();
                 currentTaskId = data.task_id;
-                tasks.set(currentTaskId, { filename: file.name, status: 'Processing' });
                 
                 showProgress(file.name);
                 listenProgress(currentTaskId);
-                refreshTaskList();
             } catch (error) {
                 alert('上传失败: ' + error.message);
             }
@@ -308,16 +728,29 @@
             status.textContent = '';
             status.className = 'status';
             cancelBtn.style.display = 'block';
+            retryBtn.style.display = 'none';
             downloadBtn.style.display = 'none';
+            connectAttempt = 0;
+            isManuallyClosed = false;
+            clearReconnectTimer();
+            pageCardsContainer.innerHTML = '';
+            drawerLogList.innerHTML = '';
+            // 自动打开详情抽屉
+            openDrawer();
         }
 
         function listenProgress(taskId) {
-            if (currentEventSource) currentEventSource.close();
+            clearReconnectTimer();
+            if (currentEventSource) {
+                currentEventSource.close();
+                currentEventSource = null;
+            }
             
             currentEventSource = new EventSource(`/progress/${taskId}`);
             
             currentEventSource.onmessage = (e) => {
                 const data = JSON.parse(e.data);
+                connectAttempt = 0;
                 
                 progressFill.style.width = data.overall_percent + '%';
                 progressPercent.textContent = data.overall_percent + '%';
@@ -333,92 +766,65 @@
                         `<div class="log-entry">${new Date(l.ts).toLocaleTimeString()} - ${l.msg}</div>`
                     ).join('');
                     logContent.scrollTop = logContent.scrollHeight;
+                    renderDrawerLogs(data.logs);
                 }
                 
-                // Update task in map
-                tasks.set(taskId, {
-                    filename: data.filename || tasks.get(taskId)?.filename || 'unknown',
-                    status: data.status,
-                    percent: data.overall_percent
-                });
-                refreshTaskList();
+                if (data.page_summaries) {
+                    renderPageSummaries(data.page_summaries);
+                }
                 
                 if (data.status === 'Complete') {
+                    isManuallyClosed = true;
                     currentEventSource.close();
                     currentEventSource = null;
                     status.textContent = '✅ ' + data.message;
                     status.className = 'status success';
                     cancelBtn.style.display = 'none';
+                    retryBtn.style.display = 'none';
                     downloadBtn.style.display = 'block';
                 } else if (data.status === 'Error') {
+                    isManuallyClosed = true;
                     currentEventSource.close();
                     currentEventSource = null;
                     status.textContent = '❌ ' + data.message;
                     status.className = 'status error';
                     cancelBtn.style.display = 'none';
+                    // 显示重试按钮（除非是任务不存在或已取消）
+                    if (data.message && (data.message.includes('不存在') || data.message.includes('已取消'))) {
+                        retryBtn.style.display = 'none';
+                    } else {
+                        retryBtn.style.display = 'block';
+                    }
                 }
             };
             
             currentEventSource.onerror = () => {
                 currentEventSource.close();
                 currentEventSource = null;
+                
+                if (isManuallyClosed) return;
+                
+                connectAttempt++;
+                if (connectAttempt <= MAX_RECONNECT_ATTEMPTS) {
+                    const delay = Math.pow(2, connectAttempt - 1) * 1000;
+                    status.textContent = `连接中断，${delay / 1000}秒后重试 (${connectAttempt}/${MAX_RECONNECT_ATTEMPTS})...`;
+                    status.className = 'status';
+                    reconnectTimer = setTimeout(() => {
+                        if (!isManuallyClosed) {
+                            listenProgress(taskId);
+                        }
+                    }, delay);
+                } else {
+                    status.innerHTML = '连接失败，<a href="#" id="retryLink">点击重试</a>';
+                    status.className = 'status error';
+                    document.getElementById('retryLink').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        connectAttempt = 0;
+                        listenProgress(taskId);
+                    });
+                }
             };
         }
-
-        function refreshTaskList() {
-            taskList.innerHTML = '';
-            tasks.forEach((task, id) => {
-                const card = document.createElement('div');
-                card.className = 'task-card';
-                if (id === currentTaskId) card.classList.add('active');
-                if (task.status === 'Error') card.classList.add('error');
-                if (task.status === 'Complete') card.classList.add('complete');
-                if (task.status === 'Processing') card.classList.add('processing');
-                
-                card.innerHTML = `
-                    <div class="task-info">
-                        <div class="task-filename">${task.filename}</div>
-                        <div class="task-status">${getStatusText(task.status)}</div>
-                    </div>
-                    <div class="task-progress-mini">
-                        <div class="task-progress-mini-fill" style="width: ${task.percent || 0}%"></div>
-                    </div>
-                `;
-                
-                card.onclick = () => {
-                    currentTaskId = id;
-                    if (!['Complete', 'Error'].includes(task.status)) {
-                        listenProgress(id);
-                    }
-                    refreshTaskList();
-                };
-                
-                taskList.appendChild(card);
-            });
-        }
-
-        function getStatusText(status) {
-            const map = {
-                'Rendering': '渲染中...',
-                'Processing': '处理中...',
-                'Generating': '生成中...',
-                'Complete': '已完成',
-                'Error': '失败'
-            };
-            return map[status] || status;
-        }
-
-        // Load existing tasks on page load
-        fetch('/tasks').then(r => r.json()).then(list => {
-            list.forEach(t => {
-                tasks.set(t.task_id, {
-                    filename: t.filename,
-                    status: t.status,
-                    percent: t.overall_percent
-                });
-            });
-            refreshTaskList();
-        });
     </script>
 </body>
 </html>
